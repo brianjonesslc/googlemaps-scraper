@@ -1,0 +1,80 @@
+import time
+from get_chrome_driver import GetChromeDriver
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from bs4 import BeautifulSoup
+import codecs
+import re
+from webdriver_manager.chrome import ChromeDriverManager
+import numpy as np
+import pandas as pd
+
+scores = pd.read_csv("cleaned_restaurant_scores.csv")
+scores = scores.dropna()
+scores = scores.astype({"Zip.Code":"int"})
+scores["Inspection.Date"] = pd.to_datetime(scores["Inspection.Date"])
+scores["building_num"] = scores["Address"].apply(lambda x: re.search("[^(]*",x).group())
+
+restaurants = scores.groupby(["Restaurant.Name","Zip.Code","Address","building_num"]).size().reset_index().drop(columns=0)
+restaurants["queries"] = restaurants["Restaurant.Name"].apply(lambda x: re.sub(" ","+",x))
+restaurants.head()
+
+get_driver = GetChromeDriver()
+get_driver.install()
+driver = webdriver.Chrome()
+wait = WebDriverWait(driver, 10)
+
+scrape_table = pd.DataFrame(columns = ['Restaurant.Name','Address','review_url','price','review_cnt','avg_score'])
+
+for i in range(4429,len(restaurants)):
+    
+    rating = [None]*2
+    reviews_url = ""
+    price = ""
+    val = "https://www.google.com/maps/search/"+restaurants["queries"][i]+"+"+str(restaurants["building_num"][i])
+    driver.get(val)
+    try:
+        wait.until(EC.url_matches('data='))
+    except:
+        pass
+    else:
+        place_url_1 = driver.current_url
+    try:
+        driver.find_element(By.CLASS_NAME, "hfpxzc").click()
+    except:
+        pass
+    try:
+        wait.until(EC.none_of(EC.url_to_be(place_url_1)))
+    except:
+        pass
+    else:
+        place_url_2 = driver.current_url
+    try:
+        driver.find_element(By.CSS_SELECTOR, "span[aria-label*='Price']")
+    except:
+        price = ""
+        pass
+    else:
+        price = driver.find_element(By.CSS_SELECTOR, "span[aria-label*='Price']").text
+    try:
+        driver.find_element(By.CSS_SELECTOR, "button[aria-label*='Reviews']").click()
+    except:
+        pass
+    try:
+        wait.until(EC.none_of(EC.url_to_be(place_url_2)))
+    except: 
+        pass
+    else:
+        reviews_url = driver.current_url
+    try:
+        rating = driver.find_element(By.CLASS_NAME, "jANrlb").text.split('\n')
+    except:
+        pass
+
+    scrape_list = list([restaurants["Restaurant.Name"][i],restaurants["Address"][i],reviews_url,price,rating[0],rating[-1]])
+    print(list(scrape_list[i] for i in [0,3,4,5]))
+    scrape_table.loc[len(scrape_table)] = scrape_list
+    
+scrape_table.to_csv("reviews.csv")
